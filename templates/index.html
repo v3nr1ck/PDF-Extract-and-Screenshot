@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PDF Extract & Screenshot</title>
+<style>
+  /* ── Reset & Base ── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #f0f2f5;
+    color: #1a1a2e;
+    min-height: 100vh;
+  }
+
+  /* ── Header ── */
+  .header {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    color: #fff;
+    padding: 20px 30px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    box-shadow: 0 2px 12px rgba(0,0,0,.15);
+  }
+  .header h1 { font-size: 22px; font-weight: 700; }
+  .header .badge {
+    background: #e94560;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .5px;
+  }
+  .header .subtitle { font-size: 13px; opacity: .7; margin-left: auto; }
+
+  /* ── Container ── */
+  .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
+
+  /* ── Cards ── */
+  .card {
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 1px 6px rgba(0,0,0,.08);
+    padding: 24px;
+    margin-bottom: 20px;
+  }
+  .card h2 {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* ── Upload ── */
+  .upload-zone {
+    border: 2px dashed #c5cae9;
+    border-radius: 12px;
+    padding: 50px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .2s, background .2s;
+  }
+  .upload-zone:hover { border-color: #5c6bc0; background: #f5f6ff; }
+  .upload-zone.has-file { border-color: #4caf50; background: #f1faf1; }
+  .upload-zone .icon { font-size: 48px; margin-bottom: 8px; }
+  .upload-zone p { color: #666; font-size: 14px; }
+  .upload-zone .filename { font-weight: 600; color: #1a1a2e; margin-top: 4px; }
+  .upload-zone input[type="file"] { display: none; }
+  .upload-status {
+    margin-top: 12px;
+    padding: 10px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    display: none;
+  }
+  .upload-status.success { display: block; background: #e8f5e9; color: #2e7d32; }
+  .upload-status.error { display: block; background: #fbe9e7; color: #c62828; }
+  .upload-status.loading { display: block; background: #fff8e1; color: #f57f17; }
+
+  /* ── Search Config ── */
+  .config-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  .config-group { display: flex; flex-direction: column; gap: 4px; }
+  .config-group label {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .4px;
+    color: #666;
+  }
+  .config-group input, .config-group select {
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-size: 14px;
+    transition: border-color .2s;
+  }
+  .config-group input:focus, .config-group select:focus {
+    outline: none;
+    border-color: #5c6bc0;
+    box-shadow: 0 0 0 3px rgba(92,107,192,.15);
+  }
+  .config-group input[type="number"] { width: 100px; }
+  .config-group.checkbox-group {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    padding-top: 18px;
+  }
+  .config-group.checkbox-group label {
+    text-transform: none;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .config-group.checkbox-group input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+  }
+  .config-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 16px;
+    align-items: center;
+  }
+
+  /* ── Buttons ── */
+  .btn {
+    padding: 10px 24px;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all .2s;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .btn-primary { background: #5c6bc0; color: #fff; }
+  .btn-primary:hover { background: #3f51b5; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(92,107,192,.3); }
+  .btn-primary:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+  .btn-secondary { background: #e8eaf6; color: #283593; }
+  .btn-secondary:hover { background: #c5cae9; }
+  .btn-success { background: #4caf50; color: #fff; }
+  .btn-success:hover { background: #388e3c; }
+  .btn-danger { background: #ef5350; color: #fff; }
+  .btn-danger:hover { background: #d32f2f; }
+
+  /* ── Results ── */
+  .results-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .results-count {
+    font-size: 14px;
+    color: #666;
+  }
+  .results-count strong { color: #1a1a2e; }
+
+  .result-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 16px;
+  }
+  .result-card {
+    border: 1px solid #eee;
+    border-radius: 10px;
+    overflow: hidden;
+    transition: box-shadow .2s, transform .2s;
+    background: #fff;
+  }
+  .result-card:hover {
+    box-shadow: 0 4px 16px rgba(0,0,0,.1);
+    transform: translateY(-2px);
+  }
+  .result-card .image-wrap {
+    position: relative;
+    background: #fafafa;
+    border-bottom: 1px solid #eee;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 180px;
+    padding: 8px;
+  }
+  .result-card .image-wrap img {
+    max-width: 100%;
+    max-height: 350px;
+    border-radius: 4px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.1);
+  }
+  .result-card .result-body {
+    padding: 14px 16px;
+  }
+  .result-card .result-body .page-badge {
+    display: inline-block;
+    background: #e8eaf6;
+    color: #283593;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 10px;
+    border-radius: 20px;
+    margin-bottom: 8px;
+  }
+  .result-card .result-body .extracted-text {
+    font-size: 13px;
+    line-height: 1.5;
+    color: #333;
+    background: #f9f9fb;
+    padding: 8px 12px;
+    border-radius: 6px;
+    border-left: 3px solid #5c6bc0;
+    max-height: 80px;
+    overflow-y: auto;
+    word-break: break-all;
+  }
+  .result-card .result-body .rect-info {
+    font-size: 11px;
+    color: #999;
+    margin-top: 6px;
+  }
+
+  /* ── No results ── */
+  .no-results {
+    text-align: center;
+    padding: 40px;
+    color: #999;
+  }
+  .no-results .icon { font-size: 48px; margin-bottom: 12px; }
+
+  /* ── Loading ── */
+  .loading-spinner {
+    display: inline-block;
+    width: 18px;
+    height: 18px;
+    border: 2px solid rgba(255,255,255,.3);
+    border-radius: 50%;
+    border-top-color: #fff;
+    animation: spin .6s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Full-page preview ── */
+  #fullpage-overlay {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,.85);
+    z-index: 1000;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+  }
+  #fullpage-overlay.open { display: flex; }
+  #fullpage-overlay img {
+    max-width: 95vw;
+    max-height: 95vh;
+    border-radius: 8px;
+    box-shadow: 0 8px 40px rgba(0,0,0,.5);
+  }
+  #fullpage-overlay .close-hint {
+    position: absolute;
+    top: 20px;
+    right: 30px;
+    color: #fff;
+    font-size: 32px;
+    opacity: .6;
+    cursor: pointer;
+  }
+  #fullpage-overlay .close-hint:hover { opacity: 1; }
+
+  /* ── Responsive ── */
+  @media (max-width: 768px) {
+    .config-grid { grid-template-columns: 1fr; }
+    .container { padding: 12px; }
+    .result-grid { grid-template-columns: 1fr; }
+    .header { flex-wrap: wrap; }
+    .header .subtitle { margin-left: 0; width: 100%; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ── Header ── -->
+<div class="header">
+  <h1>📄 PDF Extract & Screenshot</h1>
+  <span class="badge">🐶 Offline</span>
+  <span class="subtitle">Upload → Search → Validate with screenshots</span>
+</div>
+
+<div class="container">
+
+  <!-- ── Upload ── -->
+  <div class="card" id="upload-card">
+    <h2>📤 Step 1: Upload a PDF</h2>
+    <div class="upload-zone" id="drop-zone" onclick="document.getElementById('file-input').click()">
+      <div class="icon" id="drop-icon">📄</div>
+      <p>Drop your PDF here or click to browse</p>
+      <div class="filename" id="file-name"></div>
+      <input type="file" id="file-input" accept=".pdf">
+    </div>
+    <div class="upload-status" id="upload-status"></div>
+  </div>
+
+  <!-- ── Search Config ── -->
+  <div class="card" id="search-card" style="display:none;">
+    <h2>🔍 Step 2: Configure & Search</h2>
+    <div class="config-grid">
+      <div class="config-group" style="grid-column: 1 / -1;">
+        <label>Search for</label>
+        <input type="text" id="search-text" placeholder="e.g. Invoice Number, Total, Date, PO-..." autofocus>
+      </div>
+      <div class="config-group checkbox-group">
+        <input type="checkbox" id="case-sensitive">
+        <label for="case-sensitive">Case sensitive</label>
+      </div>
+      <div class="config-group checkbox-group">
+        <input type="checkbox" id="whole-word">
+        <label for="whole-word">Whole word only</label>
+      </div>
+      <div class="config-group checkbox-group">
+        <input type="checkbox" id="use-regex">
+        <label for="use-regex">Use regex <span style="opacity:.5;font-size:11px;">(advanced)</span></label>
+      </div>
+      <div class="config-group">
+        <label>Page from</label>
+        <input type="number" id="page-start" value="1" min="1">
+      </div>
+      <div class="config-group">
+        <label>Page to</label>
+        <input type="number" id="page-end" placeholder="All">
+      </div>
+      <div class="config-group">
+        <label>Zoom level</label>
+        <select id="zoom">
+          <option value="1">1x — Full page view</option>
+          <option value="2">2x — Zoomed in</option>
+          <option value="3" selected>3x — Good detail</option>
+          <option value="4">4x — Extra detail</option>
+          <option value="5">5x — Maximum zoom</option>
+        </select>
+      </div>
+      <div class="config-group">
+        <label>Padding around match (px)</label>
+        <input type="number" id="padding" value="30" min="5" max="200">
+      </div>
+    </div>
+    <div class="config-actions">
+      <button class="btn btn-primary" id="search-btn" onclick="doSearch()">
+        🔍 Search PDF
+      </button>
+      <span id="search-info" style="font-size:13px;color:#888;"></span>
+    </div>
+  </div>
+
+  <!-- ── Results ── -->
+  <div class="card" id="results-card" style="display:none;">
+    <div class="results-header">
+      <h2>📋 Results</h2>
+      <div>
+        <button class="btn btn-secondary" onclick="exportResults()" id="export-btn" style="display:none;">
+          📥 Export CSV
+        </button>
+        <span class="results-count" id="results-count"></span>
+      </div>
+    </div>
+    <div id="results-container">
+      <div class="no-results">
+        <div class="icon">🔎</div>
+        <p>No results yet. Configure your search above and give it a go!</p>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── Full-page overlay ── -->
+<div id="fullpage-overlay" onclick="this.classList.remove('open')">
+  <span class="close-hint">&times;</span>
+  <img id="fullpage-img" src="" alt="Full page view">
+</div>
+
+<script>
+// ── State ──
+let sessionId = null;
+let currentResults = [];
+
+// ── Upload handling ──
+const dropZone = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+const fileName = document.getElementById('file-name');
+const uploadStatus = document.getElementById('upload-status');
+
+dropZone.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  dropZone.style.borderColor = '#5c6bc0';
+  dropZone.style.background = '#f5f6ff';
+});
+dropZone.addEventListener('dragleave', () => {
+  dropZone.style.borderColor = '#c5cae9';
+  dropZone.style.background = '';
+});
+dropZone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropZone.style.borderColor = '#c5cae9';
+  dropZone.style.background = '';
+  if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', () => {
+  if (fileInput.files.length) handleFile(fileInput.files[0]);
+});
+
+async function handleFile(file) {
+  if (!file.name.toLowerCase().endsWith('.pdf')) {
+    uploadStatus.className = 'upload-status error';
+    uploadStatus.textContent = '❌ Must be a PDF file!';
+    return;
+  }
+
+  fileName.textContent = `📄 ${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)`;
+  dropZone.classList.add('has-file');
+  uploadStatus.className = 'upload-status loading';
+  uploadStatus.textContent = '⏳ Uploading...';
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  try {
+    const res = await fetch('/api/upload', { method: 'POST', body: formData });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+
+    sessionId = data.session_id;
+    uploadStatus.className = 'upload-status success';
+    uploadStatus.textContent = `✅ Uploaded! ${data.page_count} pages, ${(data.file_size / 1024 / 1024).toFixed(1)} MB`;
+
+    // Show search card
+    document.getElementById('search-card').style.display = 'block';
+    document.getElementById('results-card').style.display = 'block';
+    document.getElementById('search-text').focus();
+
+    // Set page range
+    document.getElementById('page-end').placeholder = `All (${data.page_count})`;
+    document.getElementById('page-end').max = data.page_count;
+
+    document.getElementById('search-info').textContent = `📄 ${data.filename} — ${data.page_count} pages ready`;
+  } catch (err) {
+    uploadStatus.className = 'upload-status error';
+    uploadStatus.textContent = `❌ ${err.message}`;
+  }
+}
+
+// ── Search ──
+async function doSearch() {
+  const searchText = document.getElementById('search-text').value.trim();
+  if (!searchText) {
+    document.getElementById('search-text').focus();
+    document.getElementById('search-text').style.borderColor = '#ef5350';
+    setTimeout(() => document.getElementById('search-text').style.borderColor = '', 2000);
+    return;
+  }
+  if (!sessionId) {
+    uploadStatus.className = 'upload-status error';
+    uploadStatus.textContent = '❌ Please upload a PDF first!';
+    return;
+  }
+
+  const btn = document.getElementById('search-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="loading-spinner"></span> Searching...';
+
+  const payload = {
+    session_id: sessionId,
+    search_text: searchText,
+    case_sensitive: document.getElementById('case-sensitive').checked,
+    whole_word: document.getElementById('whole-word').checked,
+    use_regex: document.getElementById('use-regex').checked,
+    page_start: parseInt(document.getElementById('page-start').value) || 1,
+    page_end: parseInt(document.getElementById('page-end').value) || null,
+    zoom: parseFloat(document.getElementById('zoom').value),
+    padding: parseInt(document.getElementById('padding').value) || 30,
+  };
+
+  try {
+    const res = await fetch('/api/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+
+    currentResults = data.results;
+    renderResults(data);
+  } catch (err) {
+    document.getElementById('results-container').innerHTML =
+      `<div class="no-results"><div class="icon">⚠️</div><p>${err.message}</p></div>`;
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '🔍 Search PDF';
+  }
+}
+
+function renderResults(data) {
+  const container = document.getElementById('results-container');
+  const countEl = document.getElementById('results-count');
+  const exportBtn = document.getElementById('export-btn');
+
+  if (data.total_matches === 0) {
+    container.innerHTML = `
+      <div class="no-results">
+        <div class="icon">🔎</div>
+        <p>No matches found for "${document.getElementById('search-text').value}"</p>
+        <p style="font-size:13px;color:#999;margin-top:8px;">Try adjusting your search terms or turning off case sensitivity.</p>
+      </div>`;
+    countEl.innerHTML = '';
+    exportBtn.style.display = 'none';
+    return;
+  }
+
+  countEl.innerHTML = `Found <strong>${data.total_matches}</strong> match${data.total_matches !== 1 ? 'es' : ''} across <strong>${data.pages_searched}</strong> page${data.pages_searched !== 1 ? 's' : ''}`;
+  exportBtn.style.display = 'inline-flex';
+
+  let html = '<div class="result-grid">';
+  for (const r of data.results) {
+    html += `
+      <div class="result-card">
+        <div class="image-wrap">
+          <img src="${r.screenshot}" alt="Screenshot of match" loading="lazy"
+               onclick="openFullPage('${r.screenshot}')" style="cursor:zoom-in;">
+        </div>
+        <div class="result-body">
+          <span class="page-badge">📄 Page ${r.page}</span>
+          <div class="extracted-text">${escapeHtml(r.text)}</div>
+          <div class="rect-info">
+            Area: ${Math.round(r.rect.width)} × ${Math.round(r.rect.height)} px
+          </div>
+        </div>
+      </div>`;
+  }
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+// ── Helpers ──
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function openFullPage(src) {
+  document.getElementById('fullpage-img').src = src;
+  document.getElementById('fullpage-overlay').classList.add('open');
+}
+
+function exportResults() {
+  if (!currentResults.length) return;
+
+  let csv = 'Page,Extracted Text,Rect X0,Rect Y0,Rect X1,Rect Y1\n';
+  for (const r of currentResults) {
+    const text = r.text.replace(/"/g, '""');
+    csv += `${r.page},"${text}",${r.rect.x0},${r.rect.y0},${r.rect.x1},${r.rect.y1}\n`;
+  }
+
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'pdf-extract-results.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ── Keyboard shortcut ──
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && document.activeElement?.id === 'search-text') {
+    doSearch();
+  }
+  if (e.key === 'Escape') {
+    document.getElementById('fullpage-overlay').classList.remove('open');
+  }
+});
+</script>
+
+</body>
+</html>
