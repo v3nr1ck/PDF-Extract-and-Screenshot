@@ -232,6 +232,39 @@
     color: #999;
     margin-top: 6px;
   }
+  .result-card .result-body .extracted-value {
+    background: #e8f5e9;
+    border-left: 3px solid #4caf50;
+    padding: 8px 12px;
+    border-radius: 6px;
+    margin-top: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #2e7d32;
+    word-break: break-all;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .result-card .result-body .extracted-value .method-badge {
+    display: inline-block;
+    background: #c8e6c9;
+    color: #1b5e20;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 10px;
+    text-transform: uppercase;
+    letter-spacing: .3px;
+    white-space: nowrap;
+  }
+  .result-card .result-body .extracted-value .value-label {
+    font-weight: 400;
+    color: #558b2f;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .3px;
+  }
 
   /* ── No results ── */
   .no-results {
@@ -357,6 +390,20 @@
         <label>Padding around match (px)</label>
         <input type="number" id="padding" value="30" min="5" max="200">
       </div>
+      <div class="config-group">
+        <label>Extract value</label>
+        <select id="extraction-mode" onchange="toggleExtractionCustom()">
+          <option value="off">🔍 Off — just show matches</option>
+          <option value="right">➡️ Right of match (same line)</option>
+          <option value="below">⬇️ Below match (next lines)</option>
+          <option value="smart" selected>🧠 Smart — try right, then below</option>
+          <option value="custom">🎯 Custom — regex pattern</option>
+        </select>
+      </div>
+      <div class="config-group" id="extraction-pattern-group" style="display:none; grid-column: 1 / -1;">
+        <label>Custom extraction pattern <span style="opacity:.5;font-weight:400;">(regex with capture group)</span></label>
+        <input type="text" id="extraction-pattern" placeholder="e.g. :\s*(\S+)  —  captures the first word after a colon">
+      </div>
     </div>
     <div class="config-actions">
       <button class="btn btn-primary" id="search-btn" onclick="doSearch()">
@@ -397,6 +444,13 @@
 // ── State ──
 let sessionId = null;
 let currentResults = [];
+
+// ── Toggle extraction custom pattern input ──
+function toggleExtractionCustom() {
+  const mode = document.getElementById('extraction-mode').value;
+  const group = document.getElementById('extraction-pattern-group');
+  group.style.display = mode === 'custom' ? 'block' : 'none';
+}
 
 // ── Upload handling ──
 const dropZone = document.getElementById('drop-zone');
@@ -492,6 +546,8 @@ async function doSearch() {
     page_end: parseInt(document.getElementById('page-end').value) || null,
     zoom: parseFloat(document.getElementById('zoom').value),
     padding: parseInt(document.getElementById('padding').value) || 30,
+    extraction_mode: document.getElementById('extraction-mode').value,
+    extraction_pattern: document.getElementById('extraction-pattern').value,
   };
 
   try {
@@ -536,6 +592,15 @@ function renderResults(data) {
 
   let html = '<div class="result-grid">';
   for (const r of data.results) {
+    let valueHtml = '';
+    if (r.extracted_value) {
+      valueHtml = `
+          <div class="extracted-value">
+            <span class="value-label">Value:</span>
+            ${escapeHtml(r.extracted_value)}
+            <span class="method-badge">${r.extraction_method || 'extracted'}</span>
+          </div>`;
+    }
     html += `
       <div class="result-card">
         <div class="image-wrap">
@@ -544,7 +609,7 @@ function renderResults(data) {
         </div>
         <div class="result-body">
           <span class="page-badge">📄 Page ${r.page}</span>
-          <div class="extracted-text">${escapeHtml(r.text)}</div>
+          <div class="extracted-text">${escapeHtml(r.text)}</div>${valueHtml}
           <div class="rect-info">
             Area: ${Math.round(r.rect.width)} × ${Math.round(r.rect.height)} px
           </div>
@@ -570,10 +635,11 @@ function openFullPage(src) {
 function exportResults() {
   if (!currentResults.length) return;
 
-  let csv = 'Page,Extracted Text,Rect X0,Rect Y0,Rect X1,Rect Y1\n';
+  let csv = 'Page,Extracted Text,Extracted Value,Extraction Method,Rect X0,Rect Y0,Rect X1,Rect Y1\n';
   for (const r of currentResults) {
     const text = r.text.replace(/"/g, '""');
-    csv += `${r.page},"${text}",${r.rect.x0},${r.rect.y0},${r.rect.x1},${r.rect.y1}\n`;
+    const val = (r.extracted_value || '').replace(/"/g, '""');
+    csv += `${r.page},"${text}","${val}",${r.extraction_method || ''},${r.rect.x0},${r.rect.y0},${r.rect.x1},${r.rect.y1}\n`;
   }
 
   const blob = new Blob([csv], { type: 'text/csv' });

@@ -208,6 +208,156 @@ def _render_screenshot(page, rect, zoom, padding):
 
 
 # ---------------------------------------------------------------------------
+# Value extraction helpers (no AI — pure spatial reasoning)
+# ---------------------------------------------------------------------------
+def _group_words_into_lines(words, y_tolerance=3.0):
+    """Group word tuples into lines based on y-coordinate proximity."""
+    if not words:
+        return []
+    sorted_w = sorted(words, key=lambda w: w[1])
+    lines = [[sorted_w[0]]]
+    for w in sorted_w[1:]:
+        if abs(w[1] - lines[-1][-1][1]) <= y_tolerance:
+            lines[-1].append(w)
+        else:
+            lines.append([w])
+    return lines
+
+
+def _find_line_containing(lines, match_rect):
+    """Find which line in *lines* contains *match_rect* (by y-overlap)."""
+    for i, line in enumerate(lines):
+        for w in line:
+            w_y0, w_y1 = w[1], w[3]
+            # Check vertical overlap with match rect
+            if w_y0 <= match_rect.y1 + 2 and w_y1 >= match_rect.y0 - 2:
+                return i
+    return None
+
+
+def _extract_value_right(page, match_rect, max_chars=300):
+    """Extract text on the same line to the right of the match."""
+    words = page.get_text('words')
+    if not words:
+        return ''
+    lines = _group_words_into_lines(words)
+    line_idx = _find_line_containing(lines, match_rect)
+    if line_idx is None:
+        return ''
+    
+    # Get words on that line starting at or after the match's right edge
+    right_words = sorted(
+        [w for w in lines[line_idx] if w[0] >= match_rect.x1 - 0.5],
+        key=lambda w: w[0]
+    )
+    if not right_words:
+        return ''
+    
+    text = ' '.join(w[4] for w in right_words)
+    return text[:max_chars].strip()
+
+
+def _extract_value_below(page, match_rect, max_lines=3, max_chars=300):
+    """Extract text on the line(s) directly below the match."""
+    words = page.get_text('words')
+    if not words:
+        return ''
+    lines = _group_words_into_lines(words)
+    line_idx = _find_line_containing(lines, match_rect)
+    if line_idx is None:
+        return ''
+    
+    # Get lines below, up to max_lines
+    match_width = match_rect.width
+    
+    collected = []
+    for i in range(line_idx + 1, min(line_idx + 1 + max_lines, len(lines))):
+        line_words = sorted(lines[i], key=lambda w: w[0])
+        # Only grab words that are roughly aligned with the match
+        # (within the match's x-range expanded by 50% each side)
+        x_min = match_rect.x0 - match_width * 0.5
+        x_max = match_rect.x1 + match_width * 2.0
+        aligned = [w for w in line_words if w[0] >= x_min and w[2] <= x_max]
+        if aligned:
+            collected.extend(w[4] for w in aligned)
+        else:
+            # If a line has nothing aligned, stop (we've gone past the value)
+            break
+    
+    return ' '.join(collected)[:max_chars].strip()
+
+
+def _extract_value_smart(page, match_rect, max_chars=300):
+    """Try right first, then below — best of both worlds."""
+    val = _extract_value_right(page, match_rect, max_chars)
+    if val:
+        return val, 'right'
+    val = _extract_value_below(page, match_rect, max_lines=3, max_chars=max_chars)
+    if val:
+        return val, 'below'
+    return '', 'none'
+
+
+def _extract_value_custom(page, match_rect, pattern, max_context_chars=500, max_chars=300):
+    """
+    Extract a value using a user-supplied regex pattern.
+    
+    We grab a context window around the match (the current line + next few lines),
+    then apply the user's regex. The first capture group is returned.
+    """
+    words = page.get_text('words')
+    if not words:
+        return '', ''
+    lines = _group_words_into_lines(words)
+    line_idx = _find_line_containing(lines, match_rect)
+    if line_idx is None:
+        return '', ''
+    
+    # Grab context: this line + max 5 lines below
+    start = max(0, line_idx)
+    end = min(len(lines), line_idx + 6)
+    context_parts = []
+    for i in range(start, end):
+        line_text = ' '.join(w[4] for w in sorted(lines[i], key=lambda w: w[0]))
+        context_parts.append(line_text)
+    context = '\n'.join(context_parts)[:max_context_chars]
+    
+    try:
+        compiled = re.compile(pattern)
+        m = compiled.search(context)
+        if m:
+            # Use the last group, or group(1) if available
+            if m.lastgroup:
+                return m.group(m.lastgroup), 'custom'
+            try:
+                return m.group(1), 'custom'
+            except IndexError:
+                return m.group(0), 'custom'
+    except re.error:
+        pass
+    
+    return '', 'custom'
+
+
+def extract_value(page, match_rect, mode, custom_pattern=None):
+    """
+    Dispatch to the right extraction strategy.
+    Returns (extracted_text, method_name).
+    """
+    if mode == 'off' or not mode:
+        return '', ''
+    if mode == 'right':
+        return _extract_value_right(page, match_rect), 'right'
+    if mode == 'below':
+        return _extract_value_below(page, match_rect), 'below'
+    if mode == 'smart':
+        return _extract_value_smart(page, match_rect)
+    if mode == 'custom':
+        return _extract_value_custom(page, match_rect, custom_pattern or '')
+    return '', ''
+
+
+# ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 @app.route('/')
@@ -277,7 +427,9 @@ def search_pdf():
         "page_end": null,
         "zoom": 3.0,
         "padding": 20,
-        "max_per_page": 10
+        "max_per_page": 10,
+        "extraction_mode": "off|right|below|smart|custom",
+        "extraction_pattern": ""
     }
     """
     data = request.get_json()
@@ -304,6 +456,8 @@ def search_pdf():
     zoom = max(float(data.get('zoom', 3.0)), 1.0)
     padding = int(data.get('padding', 20))
     max_per_page = int(data.get('max_per_page', 50))
+    extraction_mode = data.get('extraction_mode', 'off')
+    extraction_pattern = data.get('extraction_pattern', '')
     
     results = []
     total_matches = 0
@@ -327,6 +481,11 @@ def search_pdf():
             if not extracted_text:
                 continue
             
+            # Extract associated value (if enabled)
+            extracted_value, extraction_method = extract_value(
+                page, rect, extraction_mode, extraction_pattern
+            )
+            
             # Render zoomed screenshot
             screenshot = _render_screenshot(page, rect, zoom, padding)
             
@@ -340,6 +499,8 @@ def search_pdf():
                 },
                 'text': extracted_text,
                 'screenshot': screenshot,
+                'extracted_value': extracted_value,
+                'extraction_method': extraction_method,
             })
             page_matches += 1
             total_matches += 1
