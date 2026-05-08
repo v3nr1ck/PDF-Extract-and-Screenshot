@@ -320,8 +320,9 @@
     <h2>🔍 Step 2: Configure & Search</h2>
     <div class="config-grid">
       <div class="config-group" style="grid-column: 1 / -1;">
-        <label>Search for</label>
-        <input type="text" id="search-text" placeholder="e.g. Invoice Number, Total, Date, PO-..." autofocus>
+        <label>Search for (comma-separated for multiple terms)</label>
+        <input type="text" id="search-text" placeholder="e.g. Invoice Number, Total, Date" autofocus>
+        <div style="font-size: 12px; color: #999; margin-top: 4px;">💡 Enter multiple terms separated by commas to search for all of them at once</div>
       </div>
       <div class="config-group checkbox-group">
         <input type="checkbox" id="case-sensitive">
@@ -465,8 +466,8 @@ async function handleFile(file) {
 
 // ── Search ──
 async function doSearch() {
-  const searchText = document.getElementById('search-text').value.trim();
-  if (!searchText) {
+  const searchInput = document.getElementById('search-text').value.trim();
+  if (!searchInput) {
     document.getElementById('search-text').focus();
     document.getElementById('search-text').style.borderColor = '#ef5350';
     setTimeout(() => document.getElementById('search-text').style.borderColor = '', 2000);
@@ -482,9 +483,12 @@ async function doSearch() {
   btn.disabled = true;
   btn.innerHTML = '<span class="loading-spinner"></span> Searching...';
 
+  // Parse comma-separated search terms
+  const searchTerms = searchInput.split(',').map(t => t.trim()).filter(t => t.length > 0);
+
   const payload = {
     session_id: sessionId,
-    search_text: searchText,
+    search_terms: searchTerms,
     case_sensitive: document.getElementById('case-sensitive').checked,
     whole_word: document.getElementById('whole-word').checked,
     use_regex: document.getElementById('use-regex').checked,
@@ -503,7 +507,7 @@ async function doSearch() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error);
 
-    currentResults = data.results;
+    currentResults = data;
     renderResults(data);
   } catch (err) {
     document.getElementById('results-container').innerHTML =
@@ -534,25 +538,75 @@ function renderResults(data) {
   countEl.innerHTML = `Found <strong>${data.total_matches}</strong> match${data.total_matches !== 1 ? 'es' : ''} across <strong>${data.pages_searched}</strong> page${data.pages_searched !== 1 ? 's' : ''}`;
   exportBtn.style.display = 'inline-flex';
 
-  let html = '<div class="result-grid">';
-  for (const r of data.results) {
-    html += `
-      <div class="result-card">
-        <div class="image-wrap">
-          <img src="${r.screenshot}" alt="Screenshot of match" loading="lazy"
-               onclick="openFullPage('${r.screenshot}')" style="cursor:zoom-in;">
-        </div>
-        <div class="result-body">
-          <span class="page-badge">📄 Page ${r.page}</span>
-          <div class="extracted-text">${escapeHtml(r.text)}</div>
-          <div class="rect-info">
-            Area: ${Math.round(r.rect.width)} × ${Math.round(r.rect.height)} px
-          </div>
+  // Group results by search term
+  const resultsByTerm = data.results_by_term || {};
+  const terms = Object.keys(resultsByTerm);
+
+  let html = '';
+
+  // If multiple search terms, show tabs/sections
+  if (terms.length > 1) {
+    html += '<div style="margin-bottom: 16px; display: flex; gap: 8px; flex-wrap: wrap;">';
+    for (const term of terms) {
+      const count = resultsByTerm[term].match_count;
+      const badge = count === 0 ? '⚠️' : '✓';
+      html += `<button class="term-tab" onclick="filterByTerm('${escapeHtmlAttr(term)}')" data-term="${escapeHtmlAttr(term)}" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; background: #fff; cursor: pointer; font-size: 13px; font-weight: 500;">
+        ${badge} ${escapeHtml(term)} <span style="opacity: .6;">(${count})</span>
+      </button>`;
+    }
+    html += '</div>';
+  }
+
+  // Render results grouped by term
+  for (const term of terms) {
+    const termData = resultsByTerm[term];
+    const results = termData.results;
+    const matchCount = termData.match_count;
+
+    if (matchCount === 0) {
+      html += `<div class="term-section" data-term="${escapeHtmlAttr(term)}">
+        <div style="margin: 20px 0; padding: 16px; background: #fef3cd; border-radius: 8px; color: #856404;">
+          <strong>${escapeHtml(term)}</strong> — No matches found
         </div>
       </div>`;
+      continue;
+    }
+
+    html += `<div class="term-section" data-term="${escapeHtmlAttr(term)}">
+      <div style="margin: 20px 0 12px 0; padding-bottom: 8px; border-bottom: 2px solid #5c6bc0;">
+        <strong style="font-size: 14px; color: #1a1a2e;">"${escapeHtml(term)}"</strong>
+        <span style="font-size: 12px; color: #666; margin-left: 8px;">(${matchCount} match${matchCount !== 1 ? 'es' : ''})</span>
+      </div>
+      <div class="result-grid">`;
+
+    for (const r of results) {
+      html += `
+        <div class="result-card">
+          <div class="image-wrap">
+            <img src="${r.screenshot}" alt="Screenshot of match" loading="lazy"
+                 onclick="openFullPage('${escapeHtmlAttr(r.screenshot)}')" style="cursor:zoom-in;">
+          </div>
+          <div class="result-body">
+            <span class="page-badge">📄 Page ${r.page}</span>
+            <div class="extracted-text">${escapeHtml(r.text)}</div>
+            <div class="rect-info">
+              Area: ${Math.round(r.rect.width)} × ${Math.round(r.rect.height)} px
+            </div>
+          </div>
+        </div>`;
+    }
+    html += '</div></div>';
   }
-  html += '</div>';
+
   container.innerHTML = html;
+}
+
+function filterByTerm(term) {
+  const sections = document.querySelectorAll('.term-section');
+  sections.forEach(s => s.style.display = s.dataset.term === term ? 'block' : 'none');
+  const tabs = document.querySelectorAll('.term-tab');
+  tabs.forEach(t => t.style.borderColor = t.dataset.term === term ? '#5c6bc0' : '#ddd');
+  tabs.forEach(t => t.style.background = t.dataset.term === term ? '#e8eaf6' : '#fff');
 }
 
 // ── Helpers ──
@@ -562,18 +616,28 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
+function escapeHtmlAttr(text) {
+  return text.replace(/"/g, '&quot;').replace(/'/g, '&#x27;');
+}
+
 function openFullPage(src) {
   document.getElementById('fullpage-img').src = src;
   document.getElementById('fullpage-overlay').classList.add('open');
 }
 
 function exportResults() {
-  if (!currentResults.length) return;
+  if (!currentResults || !currentResults.results_by_term) return;
 
-  let csv = 'Page,Extracted Text,Rect X0,Rect Y0,Rect X1,Rect Y1\n';
-  for (const r of currentResults) {
-    const text = r.text.replace(/"/g, '""');
-    csv += `${r.page},"${text}",${r.rect.x0},${r.rect.y0},${r.rect.x1},${r.rect.y1}\n`;
+  const resultsByTerm = currentResults.results_by_term;
+  let csv = 'Search Term,Page,Extracted Text,Rect X0,Rect Y0,Rect X1,Rect Y1\n';
+
+  for (const term of Object.keys(resultsByTerm)) {
+    const results = resultsByTerm[term].results;
+    for (const r of results) {
+      const text = r.text.replace(/"/g, '""');
+      const escapedTerm = term.replace(/"/g, '""');
+      csv += `"${escapedTerm}",${r.page},"${text}",${r.rect.x0},${r.rect.y0},${r.rect.x1},${r.rect.y1}\n`;
+    }
   }
 
   const blob = new Blob([csv], { type: 'text/csv' });

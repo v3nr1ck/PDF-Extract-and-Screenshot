@@ -261,75 +261,32 @@ def upload_pdf():
         return jsonify({'error': f'Failed to open PDF: {str(e)}'}), 500
 
 
-@app.route('/api/search', methods=['POST'])
-def search_pdf():
-    """
-    Search the uploaded PDF with user-configured options.
-    
-    JSON body:
-    {
-        "session_id": "...",
-        "search_text": "Invoice Number",
-        "case_sensitive": false,
-        "whole_word": true,
-        "use_regex": false,
-        "page_start": 1,
-        "page_end": null,
-        "zoom": 3.0,
-        "padding": 20,
-        "max_per_page": 10
-    }
-    """
-    data = request.get_json()
-    if not data:
-        return jsonify({'error': 'No JSON body'}), 400
-    
-    session_id = data.get('session_id')
-    if not session_id or session_id not in _sessions:
-        return jsonify({'error': 'Invalid or expired session. Please re-upload.'}), 400
-    
-    session = _sessions[session_id]
-    doc = session['doc']
-    
-    search_text = data.get('search_text', '').strip()
-    if not search_text:
-        return jsonify({'error': 'Search text cannot be empty'}), 400
-    
-    case_sensitive = data.get('case_sensitive', False)
-    whole_word = data.get('whole_word', False)
-    use_regex = data.get('use_regex', False)
-    page_start = max(data.get('page_start', 1), 1)
-    page_end = data.get('page_end', None) or len(doc)
-    page_end = min(page_end, len(doc))
-    zoom = max(float(data.get('zoom', 3.0)), 1.0)
-    padding = int(data.get('padding', 20))
-    max_per_page = int(data.get('max_per_page', 50))
-    
+def _search_single_term(doc, search_text, case_sensitive, whole_word, use_regex, page_start, page_end, zoom, padding, max_per_page):
+    """Search for a single term and return results with screenshots."""
     results = []
-    total_matches = 0
-    
+
     for page_num in range(page_start - 1, page_end):
         page = doc[page_num]
-        
+
         rects, error = _search_page_words(
             page, search_text, case_sensitive, whole_word, use_regex
         )
         if error:
-            return jsonify({'error': error}), 400
-        
+            return None, error
+
         page_matches = 0
         for rect in rects:
             if page_matches >= max_per_page:
                 break
-            
+
             # Extract text from the area
             extracted_text = page.get_text('text', clip=rect).strip()
             if not extracted_text:
                 continue
-            
+
             # Render zoomed screenshot
             screenshot = _render_screenshot(page, rect, zoom, padding)
-            
+
             results.append({
                 'page': page_num + 1,
                 'page_label': page.get_label() or str(page_num + 1),
@@ -342,16 +299,92 @@ def search_pdf():
                 'screenshot': screenshot,
             })
             page_matches += 1
-            total_matches += 1
-    
+
+    return results, None
+
+
+@app.route('/api/search', methods=['POST'])
+def search_pdf():
+    """
+    Search the uploaded PDF with user-configured options.
+    Supports both single and multiple search terms.
+
+    JSON body (single search):
+    {
+        "session_id": "...",
+        "search_text": "Invoice Number",
+        "case_sensitive": false,
+        ...
+    }
+
+    JSON body (multi search):
+    {
+        "session_id": "...",
+        "search_terms": ["Invoice Number", "Total", "Date"],
+        ...
+    }
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No JSON body'}), 400
+
+    session_id = data.get('session_id')
+    if not session_id or session_id not in _sessions:
+        return jsonify({'error': 'Invalid or expired session. Please re-upload.'}), 400
+
+    session = _sessions[session_id]
+    doc = session['doc']
+
+    # Support both single search_text and multiple search_terms
+    search_terms = data.get('search_terms', [])
+    if not search_terms:
+        search_text = data.get('search_text', '').strip()
+        if not search_text:
+            return jsonify({'error': 'Search text cannot be empty'}), 400
+        search_terms = [search_text]
+    else:
+        search_terms = [t.strip() for t in search_terms if t.strip()]
+        if not search_terms:
+            return jsonify({'error': 'At least one search term is required'}), 400
+
+    case_sensitive = data.get('case_sensitive', False)
+    whole_word = data.get('whole_word', False)
+    use_regex = data.get('use_regex', False)
+    page_start = max(data.get('page_start', 1), 1)
+    page_end = data.get('page_end', None) or len(doc)
+    page_end = min(page_end, len(doc))
+    zoom = max(float(data.get('zoom', 3.0)), 1.0)
+    padding = int(data.get('padding', 20))
+    max_per_page = int(data.get('max_per_page', 50))
+
+    # Results organized by search term
+    results_by_term = {}
+    total_matches = 0
+
+    for search_text in search_terms:
+        results, error = _search_single_term(
+            doc, search_text, case_sensitive, whole_word, use_regex,
+            page_start, page_end, zoom, padding, max_per_page
+        )
+
+        if error:
+            return jsonify({'error': f'Error in "{search_text}": {error}'}), 400
+
+        match_count = len(results)
+        results_by_term[search_text] = {
+            'results': results,
+            'match_count': match_count,
+        }
+        total_matches += match_count
+
     # Update session with last search params
     session['last_search'] = {
-        'text': search_text,
+        'terms': search_terms,
         'results_count': total_matches,
     }
-    
+
     return jsonify({
-        'results': results,
+        'results_by_term': results_by_term,
         'total_matches': total_matches,
         'pages_searched': page_end - page_start + 1,
         'session_id': session_id,
